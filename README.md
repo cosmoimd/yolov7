@@ -6,7 +6,7 @@ The last commit from the original repository was [a207844b1ce82d204ab36d87d49672
 
 
 ## Open-Access Data Download
-Datasets can be assembled from multiple open-source public colonoscopy datasets by utilizing the codes in the `real_colon/datasets_downloads/` directory and converted/split using `real_colon/datasets_for_yolo/`. Full details and code to download the dataset and prepare data for model training and testing can be found in the following sections:
+Datasets can be assembled from multiple open-source public colonoscopy datasets by utilizing the codes in the `colonoscopy/datasets_downloads/` directory and converted/split using `colonoscopy/datasets_for_yolo/`. Full details and code to download the dataset and prepare data for model training and testing can be found in the following sections:
 
 * **Dataset download**: [Read the instructions here](colonoscopy/datasets_downloads/README.md)
 * **YOLO preprocessing**: [Read the instructions here](colonoscopy/datasets_for_yolo/README.md)

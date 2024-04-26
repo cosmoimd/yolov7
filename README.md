@@ -1,3 +1,38 @@
+# YOLOv7 for Polyp Detection
+
+This repository is a fork from [WongKinYiu/yolov7](https://github.com/WongKinYiu/yolov7) and provides all the training and testing codes to train and validate YOLOv7 model for polyp detection.
+
+The last commit from the original repository was [a207844b1ce82d204ab36d87d496728d3d2348e7](https://github.com/WongKinYiu/yolov7/commit/a207844b1ce82d204ab36d87d496728d3d2348e7).
+
+
+## Open-Access Data Download
+Datasets can be assembled from multiple open-source public colonoscopy datasets by utilizing the codes in the `real_colon/datasets_downloads/` directory and converted/split using `real_colon/datasets_for_yolo/`. Full details and code to download the dataset and prepare data for model training and testing can be found in the following sections:
+
+* **Dataset download**: [Read the instructions here](colonoscopy/datasets_downloads/README.md)
+* **YOLO preprocessing**: [Read the instructions here](colonoscopy/datasets_for_yolo/README.md)
+
+## Model Development and Validation
+
+For standard training and testing of the YOLOv7 model for polyp detection follow these instructions:
+
+### Training
+- Enter a virtual environment and create a .yaml file in the data/ folder. Add the correct paths for your dataset.
+- To start training, run `python3 train.py --workers 8 --device 0 --batch-size 16 --epochs 50 --data <path_to_yaml_file> --hyp data/hyp.scratch.colonoscopy.yaml --cfg cfg/training/yolov7_colon.yaml --negative-sampling-rate 0.5 --name <model_name> --weights yolov7.pt`
+This will save the model weights in `./runs/train/<model_name>/weights`.
+
+### Validation
+- To start testing, run: `python3 test.py --data <path_to_yaml_file> --img 640 --batch 16 --conf 0.001 --iou 0.65 --device 0 --save-txt --save-conf --save-json --weights <path_to_yolov7_weights> --name <name_of_the_test> --task test`. An optional `--test-dir` allows you to change the testing directory.
+This will also save the results and labels in `./runs/test/<test_name>/`.
+- To get ROC plots, run `python standard_ROC.py <path_to_real_colon_base> <path_to_test_labels> <test_on>`.
+- To get FROC plots, run `python fROC.py <path_to_real_colon_base> <path_to_test_labels> <test_on>`. This will also save a pickle file with the results.
+- To get multiple FROC plots in one graph, run `python plot_fROC_pkls.py <path_to_save_directory> <file_name> <pkl_file_1> <pkl_file_2> ...`.
+- For more information, please [read the instructions here](colonoscopy/README.md).
+
+
+## Contact
+Carlo Biffi - cbiffi@cosmoimd.com
+
+
 # Official YOLOv7
 
 Implementation of paper - [YOLOv7: Trainable bag-of-freebies sets new state-of-the-art for real-time object detectors](https://arxiv.org/abs/2207.02696)

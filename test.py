@@ -45,7 +45,6 @@ def test(data,
     training = model is not None
     if training:  # called by train.py
         device = next(model.parameters()).device  # get model device
-
     else:  # called directly
         set_logging()
         device = select_device(opt.device, batch_size=batch_size)
@@ -58,7 +57,7 @@ def test(data,
         model = attempt_load(weights, map_location=device)  # load FP32 model
         gs = max(int(model.stride.max()), 32)  # grid size (max stride)
         imgsz = check_img_size(imgsz, s=gs)  # check img_size
-        
+
         if trace:
             model = TracedModel(model, device, imgsz)
 
@@ -74,6 +73,8 @@ def test(data,
         with open(data) as f:
             data = yaml.load(f, Loader=yaml.SafeLoader)
     check_dataset(data)  # check
+    if not training and opt.test_dir:
+        data['test'] = opt.test_dir
     nc = 1 if single_cls else int(data['nc'])  # number of classes
     iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
     niou = iouv.numel()
@@ -92,7 +93,7 @@ def test(data,
 
     if v5_metric:
         print("Testing with YOLOv5 AP metric...")
-    
+
     seen = 0
     confusion_matrix = ConfusionMatrix(nc=nc)
     names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
@@ -165,8 +166,11 @@ def test(data,
 
             # Append to pycocotools JSON dictionary
             if save_json:
-                # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
-                image_id = int(path.stem) if path.stem.isnumeric() else path.stem
+                if 'polyp' in data['names']:
+                    # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
+                    image_id = int(path.stem) if path.stem.isnumeric() else path.stem
+                else:
+                    image_id = path.stem
                 box = xyxy2xywh(predn[:, :4])  # xywh
                 box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
                 for p, b in zip(pred.tolist(), box.tolist()):
@@ -252,27 +256,84 @@ def test(data,
         wandb_logger.log({"Bounding Box Debugger/Images": wandb_images})
 
     # Save JSON
-    if save_json and len(jdict):
+    if save_json:
         w = Path(weights[0] if isinstance(weights, list) else weights).stem if weights is not None else ''  # weights
-        anno_json = './coco/annotations/instances_val2017.json'  # annotations json
+        if 'polyp' in data['names']:
+            anno_json = os.path.join(data['test'], 'test_ann.json')  # annotations json
+        else:
+            anno_json = f'./coco/annotations/instances_val2017.json'  # annotations json
         pred_json = str(save_dir / f"{w}_predictions.json")  # predictions json
         print('\nEvaluating pycocotools mAP... saving %s...' % pred_json)
         with open(pred_json, 'w') as f:
             json.dump(jdict, f)
 
+        pred_json = str(save_dir / f"{w}_predictions.json")  # predictions json
+
+        if 'polyp' in data['names']:
+            # Load the JSON file
+            with open(pred_json, 'r') as file:
+                data_pred_json = json.load(file)
+
+            # Load the JSON file
+            with open(anno_json, 'r') as file:
+                data_anno_json = json.load(file)
+
+            # Reformat annotations to be processed by pycocotools
+            new_annotations = []
+            for annotation in data_anno_json['annotations']:
+                if ".0" in annotation['image_id']:
+                    annotation['image_id'] = annotation['image_id'].replace(".0", "")
+                annotation["category_id"] = 0
+                new_annotations.append(annotation)
+            data_anno_json['annotations'] = new_annotations
+            new_images = []
+            for image in data_anno_json["images"]:
+                if ".0" in image['id']:
+                    image['id'] = image['id'].replace(".0", "")
+                new_images.append(image)
+            data_anno_json['images'] = new_images
+            anno_json_new = str(save_dir / f"anno_json_new.json")
+            with open(anno_json_new, 'w') as f:
+                json.dump(data_anno_json, f)
+
+            # Reformat predictions to be processed by pycocotools
+            new_predictions = []
+            for prediction in data_pred_json:
+                prediction["bbox"] = [int(b) for b in prediction["bbox"]]
+                prediction['category_id'] = 0
+                if ".0" in prediction['image_id']:
+                    prediction['image_id'] = prediction['image_id'].replace(".0", "")
+                new_predictions.append(prediction)
+            data_pred_json = new_predictions
+            pred_json_new = str(save_dir / f"best_predictions_fixed.json")
+            with open(pred_json_new, 'w') as f:
+                json.dump(data_pred_json, f)
+
+            anno_json = anno_json_new
+            pred_json = pred_json_new
+
         try:  # https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocoEvalDemo.ipynb
             from pycocotools.coco import COCO
-            from pycocotools.cocoeval import COCOeval
+            if 'polyp' in data['names']:
+                from colonoscopy.cocoeval import COCOeval
+            else:
+                from pycocotools.cocoeval import COCOeval
 
             anno = COCO(anno_json)  # init annotations api
             pred = anno.loadRes(pred_json)  # init predictions api
             eval = COCOeval(anno, pred, 'bbox')
             if is_coco:
-                eval.params.imgIds = [int(Path(x).stem) for x in dataloader.dataset.img_files]  # image IDs to evaluate
+                eval.params.imgIds = [int(Path(x).stem) for x in
+                                      dataloader.dataset.img_files]  # image IDs to evaluatedd
+            save_results_file = os.path.join(save_dir, "test_results.txt")
+            with open(save_results_file, 'a') as file:
+                file.write("")
+            eval.save = save_results_file
             eval.evaluate()
             eval.accumulate()
             eval.summarize()
             map, map50 = eval.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
+
         except Exception as e:
             print(f'pycocotools unable to run: {e}')
 
@@ -291,6 +352,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
     parser.add_argument('--weights', nargs='+', type=str, default='yolov7.pt', help='model.pt path(s)')
     parser.add_argument('--data', type=str, default='data/coco.yaml', help='*.data path')
+    parser.add_argument('--test-dir', type=str, default='', help='specified test directory')
     parser.add_argument('--batch-size', type=int, default=32, help='size of each image batch')
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
@@ -313,7 +375,7 @@ if __name__ == '__main__':
     opt.save_json |= opt.data.endswith('coco.yaml')
     opt.data = check_file(opt.data)  # check file
     print(opt)
-    #check_requirements()
+    # check_requirements()
 
     if opt.task in ('train', 'val', 'test'):  # run normally
         test(opt.data,
@@ -335,7 +397,8 @@ if __name__ == '__main__':
 
     elif opt.task == 'speed':  # speed benchmarks
         for w in opt.weights:
-            test(opt.data, w, opt.batch_size, opt.img_size, 0.25, 0.45, save_json=False, plots=False, v5_metric=opt.v5_metric)
+            test(opt.data, w, opt.batch_size, opt.img_size, 0.25, 0.45, save_json=False, plots=False,
+                 v5_metric=opt.v5_metric)
 
     elif opt.task == 'study':  # run over a range of settings and save/plot
         # python test.py --task study --data coco.yaml --iou 0.65 --weights yolov7.pt
